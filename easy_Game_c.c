@@ -64,8 +64,8 @@
 #define DISP_H (SEG_F | SEG_E | SEG_G | SEG_B | SEG_C)            // display H
 #define DISP_O (SEG_A | SEG_B | SEG_C | SEG_D | SEG_E | SEG_F)    // display O
 #define DISP_L (SEG_F | SEG_E | SEG_D)                            // display L
-#define o_UP   (SEG_G | SEG_C | SEG_D | SEG_E)                    // norm o
-#define o_DOWN (SEG_A | SEG_B | SEG_G | SEG_F)                    // jump o 
+#define o_DOWN (SEG_G | SEG_C | SEG_D | SEG_E)                    // norm o
+#define o_UP   (SEG_A | SEG_B | SEG_G | SEG_F)                    // jump o 
 
 /* DIP Switch */
 #define SWITCH_MASK 0x0f     // 0000 1111, port[3:0]
@@ -78,6 +78,8 @@ void bobo(void);               		 // Process function
 void bobo_jump(void);          		 // bobo jump!
 void sleep(unsigned value);          // sleep function
 void level_up(void);                 // level up Function
+void change_level(void);
+void game_OVER(void);
 
 /* -------------------------------------------------- */
 
@@ -99,7 +101,7 @@ void game_main(void){
 	while(1){
 		/* Game Over */
 		if((*IOPDATA & LED_MASK) == LED_MASK){       // All LED turn on
-			timer_switch(STOP);	
+			timer_switch(0);	
 			break;
 		}
 		/* Game processing */
@@ -119,13 +121,9 @@ void timer_irq(void){
 	
 	/* This function gengerate the LED randomly */
 	
-	//unsigned ioData_s = number_display[counter % 10];
-	unsigned ioData_LED = led_display[rand() % 4];
+	unsigned ioData_LED = led_display[rand() % 4];    
 	
 	
-	*IOPDATA &= ~SEG_MASK; 
-	*IOPDATA &= ~LED_MASK;
-	//*IOPDATA |= ioData_s;
 	*IOPDATA |= ioData_LED;
 	
 	/* Recover the IRQ Interrupt */
@@ -155,18 +153,17 @@ void initialization(void){
 	*TMOD  &= 0x00000000;         // Initialize Timer
 	*TDATA &= 0x00000000  ;       
 	
-	/* Setting Envirnment */
-	
+	/* Setting Envirnment */	
 	*INTMASK &= 0x00DFFBFF;
 	*INTPND  &= 0x00000400;
 	*TMOD    |= 0x00000001;
-	time_interval = (3 * ONE_SEC);     // Time Interval is 4 sec.
+	time_interval = (4 * ONE_SEC);     // Time Interval is 3 sec.
 	*TDATA   |= time_interval;         // Set timer trigger interval
 	*IOPDATA |= o_DOWN;                // Set 7-seg Display Bobo
 	current_switch = (*IOPDATA & SWITCH_MASK);
 	score = 0;                  	   // reset score
 	level = 0;
-	srand = time(NULL);
+	srand(time(NULL));
 	
 	return ;
 }
@@ -178,11 +175,12 @@ void initialization(void){
 void timer_switch(unsigned option){
 	
 	switch(option){
-		case 1 :               // stop timer
-			*INTMASK |= (1 << 11);
+		case 0 :                       // stop timer
+			*TDATA &= 0x00000000;      // Clear INTPND
 			break;
-		case 2 :              // start timer
-			*INTMASK &= 0x00DFFBFF;
+		case 1 :                       // start timer
+			*TDATA &= 0x00000000;
+			*TDATA |= time_interval;
 			break;
 		default : 
 			break;
@@ -202,7 +200,7 @@ void bobo(void){
 	/* Get Switch Action */
 	
 	prev_switch = current_switch;
-	current_switch = (*IOPDATA & ~SWITCH_MASK);      // get swtich value
+	current_switch = (*IOPDATA & SWITCH_MASK);      // get swtich value
 	diff_switch = prev_switch ^ current_switch;      // get switch difference
 	
 	switch(diff_switch){
@@ -245,7 +243,7 @@ void bobo_jump(void){
 	*IOPDATA &= ~SEG_MASK;
 	*IOPDATA |= o_UP;
 	
-	sleep(2000);
+	sleep(700000);
 	
 	*IOPDATA &= ~SEG_MASK;
 	*IOPDATA |= o_DOWN;
@@ -261,7 +259,7 @@ void sleep(unsigned value){
 	
 	int i;
 	
-	for(i = 0; i < value; i++)
+	for(i = 0; i < value; i++);
 		/* for loop */
 		
 	return ;
@@ -276,10 +274,14 @@ void level_up(void){
 	switch(score){
 		
 		case 3 :
-		case 10 :
-		case 20 :	
+		case 6 :
+		case 12 :
+		case 20 :
+		case 30 :	
 			level++;
-			time_interval -= ONE_SEC;
+			timer_switch(0);           // stop to service interrupt
+			change_level();
+			timer_switch(1); 
 			break;
 		default : 
 			break;
@@ -300,15 +302,59 @@ void game_OVER(void){
 	*INTMASK |= 0xFFFFFFFF;
 	
 	/* Bobo Bye bye */
-	while(1){
+	for(i = 0; i < 3; i++){
 		
 		*IOPDATA |= LED_ALL;
 		*IOPDATA |= o_DOWN;
-		sleep(8000);
+		sleep(1000000);
 		
 		*IOPDATA &= ~SEG_MASK;
 		*IOPDATA &= ~LED_MASK;
-		sleep(2000);
+		sleep(1000000);
 	
+	}
+	
+	while(1){
+		
+		*IOPDATA |= ((score / 10) << 4) ;         // LED Display 十位數之後 
+		*IOPDATA |= number_display[score % 10];   // 7-SEG Display 個位數 
+		sleep(1000000);
+		
+		*IOPDATA &= ~SEG_MASK;
+		*IOPDATA &= ~LED_MASK;
+		sleep(1000000);
+		
 	}	
+}
+
+void change_level(void){
+	
+	int i;
+	
+	/* Decrease trigger time */
+	if(level < 4){
+		time_interval -= ONE_SEC;
+	}		
+	else if(level == 4){
+		time_interval = 0.5 * ONE_SEC;
+	}
+	else{
+		time_interval = 0.1 * ONE_SEC;
+	}
+		
+			
+	/* display changing level */
+	for(i = 0; i < 3; i++){
+		*IOPDATA &= ~SEG_MASK;
+		*IOPDATA |= number_display[level];     
+		sleep(1500000);
+		*IOPDATA &= ~SEG_MASK;
+		sleep(1500000);
+	}
+	
+					
+	*IOPDATA |= o_DOWN;
+	sleep(1000000);
+	
+	return ;
 }
